@@ -39,6 +39,36 @@ python3 dropmux.py --show
 
 The optional `launch.sh` starts the application in an existing Distrobox named `codex-tools`. Adapt the launcher for another container, or run directly on the host.
 
+## Recreate the Distrobox environment
+
+Requires Distrobox and rootless Podman on the host. The setup script does not install these host prerequisites.
+
+To clone an existing `codex-tools` box with its installed packages, including GitHub Desktop:
+
+```sh
+./scripts/recreate-distrobox.sh --name codex-tools-copy
+```
+
+Use `--source NAME` for a differently named source. The script refuses to overwrite an existing destination. This local clone is the closest match to the current environment; it is not a portable image backup.
+
+To rebuild on another machine:
+
+```sh
+./scripts/recreate-distrobox.sh --fresh --name codex-tools
+```
+
+This starts from `docker.io/library/archlinux:latest` and installs the explicit official Arch package set recorded in `environment/packages.arch.txt`, including GTK/VTE, tmux, fish, Git and GitHub CLI. `environment/packages.snapshot.txt` records installed versions for reference; Arch is rolling-release, so a fresh rebuild does not pin those versions.
+
+To include the community GitHub Desktop build on a fresh box:
+
+```sh
+./scripts/recreate-distrobox.sh --fresh --name codex-tools --with-github-desktop
+```
+
+The optional flag builds the current `github-desktop-bin` AUR recipe. Inspect that recipe before opting in; the build may differ from the package version in the snapshot. Without the flag, fresh mode installs official Arch packages only.
+
+Distrobox shares the host home by default. Account credentials, personal settings and task lists are not distributed by this script; configure accounts on the destination host as needed. Run Dropmux in the new box using the launch command printed by the script.
+
 ## Controls
 
 | Control | Action |
