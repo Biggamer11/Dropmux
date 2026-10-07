@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 
-DEFAULTS = {'width': 1100, 'height': 500, 'pinned': True, 'font': 'Monospace 11', 'bar_color': '#00d700', 'show_bar': True, 'bar_texture': 'brushed'}
+DEFAULTS = {'width': 1100, 'height': 500, 'pinned': True, 'font': 'Monospace 11', 'bar_color': '#00d700', 'show_bar': True, 'bar_texture': 'brushed', 'pane_pins': []}
 
 class Preferences:
     def __init__(self, path=None):
@@ -17,6 +17,12 @@ class Preferences:
                 value = data.get(key)
                 if type(value) is int:
                     self.values[key] = min(high, max(low, value))
+            pins = data.get('pane_pins', [])
+            if isinstance(pins, list):
+                self.values['pane_pins'] = [pin for pin in pins[:128] if isinstance(pin, dict)
+                    and isinstance(pin.get('server'), str) and len(pin['server']) <= 1024
+                    and isinstance(pin.get('pane'), str) and pin['pane'].startswith('%')
+                    and pin['pane'][1:].isdigit()]
             if type(data.get('show_bar')) is bool:
                 self.values['show_bar'] = data['show_bar']
             if data.get('bar_texture') in ('none', 'brushed', 'diagonal', 'grid', 'marble'):

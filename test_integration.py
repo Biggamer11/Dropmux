@@ -9,7 +9,7 @@ class RealTmuxTest(unittest.TestCase):
  def test_real_panes_windows_input_and_survival(self):
   socket='dropmux-test-'+str(os.getpid())
   def runner(argv,**kwargs):
-   return subprocess.run(argv,env={**os.environ,'SHELL':'/bin/sh'},**kwargs)
+   return subprocess.run(argv,**{**kwargs, 'env': {**kwargs.get('env',os.environ),'SHELL':'/bin/sh'}})
   tmux=Tmux(socket=socket,runner=runner)
   try:
    session=tmux.ensure_session('test')
@@ -34,6 +34,6 @@ class RealTmuxTest(unittest.TestCase):
    self.assertEqual(len(tmux.windows(session)),2)
    self.assertTrue(tmux.command('has-session','-t',session)== '')
   finally:
-   subprocess.run(['tmux','-L',socket,'kill-server'],capture_output=True)
+   subprocess.run([tmux.executable,'-L',socket,'kill-server'],capture_output=True)
 
 if __name__=='__main__':unittest.main()

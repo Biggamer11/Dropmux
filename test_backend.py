@@ -11,7 +11,7 @@ class BackendTest(unittest.TestCase):
             self.calls.append(argv)
             output = "%7" if argv[-1] == "#{pane_id}" else "/tmp/path with spaces"
             return subprocess.CompletedProcess(argv, 0, output, "")
-        self.tmux = Tmux(runner=runner)
+        self.tmux = Tmux(executable="tmux", runner=runner)
 
     def test_split_targets_real_pane_and_preserves_cwd_argument(self):
         self.tmux.split("$1")

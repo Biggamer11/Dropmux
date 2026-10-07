@@ -9,6 +9,7 @@ import gi
 gi.require_version("Gtk", "3.0")
 gi.require_version("Vte", "2.91")
 from gi.repository import Gtk, Gio, GLib, Gdk, Vte, Pango
+import backend
 from backend import Tmux
 from preferences import Preferences
 from task_catalog import load_tasks
@@ -22,6 +23,7 @@ class Dropmux(Gtk.Application):
         self.tmux = Tmux()
         self.session = None
         self.snapshot = None
+        self.pane_server = None
         self.pinned = self.preferences.values['pinned']
         self.fullscreen = False
         self.attaching = False
@@ -76,8 +78,10 @@ class Dropmux(Gtk.Application):
         bar.set_valign(Gtk.Align.CENTER)
         css = Gtk.CssProvider()
         css.load_from_data(b'''
-        .native-footer { background: #00d700; color: black; padding: 4px 0; }
-        .native-footer label { color: black; font: 11px monospace; }
+        .native-footer { background: #00d700; color: black; padding: 2px 0; }
+        .native-footer label { color: black; font: 12px monospace; }
+        .native-footer button { min-height: 24px; padding: 2px 7px; }
+        .native-footer button:checked { background-image: none; background-color: #96f0b2; border: 2px solid #143d20; }
         .status-toolbar, .status-toolbar button, .status-toolbar combobox,
         .status-toolbar box { background: transparent; background-image: none;
           border: none; box-shadow: none; color: black; }
@@ -95,19 +99,14 @@ class Dropmux(Gtk.Application):
         self.sessions.connect("changed", self.session_changed)
         self.sessions.connect('key-press-event', self.navigate_toolbar)
         self.pin = Gtk.Button(label='Pinned' if self.pinned else 'Pin')
-        self.catalog_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tasks.json')
+        self.catalog_path = os.environ.get('DROPMUX_TASKS_FILE', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tasks.json'))
         self.tasks = []
-        self.sessions.set_no_show_all(True)
+        self.sessions.set_tooltip_text("Workspace (existing tmux session)")
         self.refresh_tasks()
         accelerators = Gtk.AccelGroup()
         accelerators.connect(Gdk.KEY_t, Gdk.ModifierType.MOD1_MASK, Gtk.AccelFlags.VISIBLE, self.focus_toolbar)
         self.window.add_accel_group(accelerators)
         self.tabs = Gtk.Box(spacing=4, margin_start=6, margin_end=6)
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_no_show_all(True)
-        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
-        scroll.add(self.tabs)
-        root.pack_start(scroll, False, False, 0)
         self.term = Vte.Terminal()
         self.term.set_font(Pango.FontDescription(self.preferences.values['font']))
         self.term.set_scrollback_lines(10000)
@@ -116,7 +115,7 @@ class Dropmux(Gtk.Application):
         self.term.connect("child-exited", self.child_exited)
         root.pack_start(self.term, True, True, 0)
         footer = Gtk.Box(spacing=8, margin_top=0)
-        footer.set_size_request(-1, 48)
+        footer.set_size_request(-1, 40)
         self.footer = footer
         footer.set_no_show_all(True)
         self.bar_css = Gtk.CssProvider()
@@ -137,10 +136,38 @@ class Dropmux(Gtk.Application):
             frame.add(label)
             self.status_sections.append(frame)
             return frame
-        footer.pack_start(section(self.footer_left, "Session and active tmux window"), False, False, 0)
-        footer.pack_start(bar, True, True, 0)
-        footer.pack_start(section(self.footer_right, "Active pane folder"), False, False, 0)
-        footer.pack_start(section(self.footer_clock, "Local time and date"), False, False, 0)
+        # One horizontal strip: workspace stays visible; the remaining controls
+        # scroll sideways at narrow widths instead of wrapping or shrinking text.
+        workspace = Gtk.Box(spacing=4, margin_start=6)
+        workspace.set_valign(Gtk.Align.CENTER)
+        workspace.pack_start(Gtk.Label(label="Workspace"), False, False, 0)
+        workspace.pack_start(self.sessions, False, False, 0)
+        footer.pack_start(workspace, False, False, 0)
+        self.pin_pane_button = Gtk.Button(label="Pin pane")
+        self.pin_pane_button.set_valign(Gtk.Align.CENTER)
+        self.pin_pane_button.set_tooltip_text("Pin or unpin the active pane across workspaces")
+        self.pin_pane_button.connect('clicked', lambda _: self.perform(self.toggle_pane_pin))
+        self.footer_scroll = Gtk.ScrolledWindow()
+        self.footer_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        self.footer_scroll.set_overlay_scrolling(True)
+        self.footer_scroll.set_min_content_width(120)
+        self.footer_scroll.connect('scroll-event', self.scroll_footer)
+        self.footer_row = Gtk.Box(spacing=6)
+        self.footer_row.set_valign(Gtk.Align.CENTER)
+        self.footer_scroll.add(self.footer_row)
+        footer.pack_start(self.footer_scroll, True, True, 0)
+        self.footer_row.pack_start(self.pin_pane_button, False, False, 0)
+        self.footer_row.pack_start(self.tabs, False, False, 0)
+        self.footer_row.pack_start(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL), False, False, 2)
+        self.footer_row.pack_start(Gtk.Label(label="Pins"), False, False, 0)
+        self.pinned_tabs = Gtk.Box(spacing=4)
+        self.footer_row.pack_start(self.pinned_tabs, False, False, 0)
+        self.footer_row.pack_start(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL), False, False, 2)
+        self.footer_row.pack_start(Gtk.Label(label="Tasks"), False, False, 0)
+        self.footer_row.pack_start(bar, False, False, 0)
+        self.footer_row.pack_start(section(self.footer_left, "Session and active tmux window"), False, False, 0)
+        self.footer_row.pack_start(section(self.footer_right, "Active pane folder"), False, False, 0)
+        self.footer_row.pack_start(section(self.footer_clock, "Local time and date"), False, False, 0)
         root.pack_start(footer, False, False, 0)
         self.apply_bar_style()
         if self.preferences.values["show_bar"]:
@@ -150,7 +177,7 @@ class Dropmux(Gtk.Application):
         self.status = Gtk.Label(label="Ready", xalign=0, margin_start=8, margin_bottom=5)
         self.status.set_no_show_all(True)
         root.pack_start(self.status, False, False, 0)
-        if not shutil.which("tmux"):
+        if not shutil.which(self.tmux.executable):
             self.status.set_text("tmux is missing. Install tmux, then restart Dropmux. See README.md.")
             for child in bar.get_children()[:-3]:
                 child.set_sensitive(False)
@@ -158,6 +185,16 @@ class Dropmux(Gtk.Application):
         self.perform(lambda: self.attach(self.tmux.ensure_session("main")))
         GLib.timeout_add(700, self.refresh)
         GLib.timeout_add(3000, self.refresh_tasks)
+
+    def scroll_footer(self, widget, event):
+        adjustment = self.footer_scroll.get_hadjustment()
+        if event.direction == Gdk.ScrollDirection.SMOOTH:
+            _, dx, dy = event.get_scroll_deltas()
+            delta = (dx if abs(dx) > abs(dy) else dy) * 60
+        else:
+            delta = -80 if event.direction in (Gdk.ScrollDirection.UP, Gdk.ScrollDirection.LEFT) else 80
+        adjustment.set_value(max(adjustment.get_lower(), min(adjustment.get_upper() - adjustment.get_page_size(), adjustment.get_value() + delta)))
+        return True
 
     def refresh_tasks(self):
         tasks = load_tasks(self.catalog_path)
@@ -171,6 +208,7 @@ class Dropmux(Gtk.Application):
         for task in tasks:
             button = self.button(self.toolbar, task['title'], task['title'] + '\n' + task['cwd'],
                 lambda task=task: self.select_task(task))
+            button.set_size_request(120, -1)
             button.task_id = task['id']
             label = button.get_child()
             label.set_ellipsize(Pango.EllipsizeMode.END)
@@ -243,7 +281,7 @@ class Dropmux(Gtk.Application):
             self.preferences.values['bar_color'], textures[self.preferences.values['bar_texture']])
         self.bar_css.load_from_data(css.encode())
         section_css = Gtk.CssProvider()
-        section_css.load_from_data(b'.status-section { background-color: #000000; background-image: none; border: 1px solid #555555; border-radius: 6px; padding: 9px 10px; margin: 0 7px; } .status-section label { color: #ffffff; font: 11px monospace; }')
+        section_css.load_from_data(b'.status-section { background-color: #000000; background-image: none; border: 1px solid #555555; border-radius: 6px; padding: 4px 7px; margin: 0 2px; } .status-section label { color: #ffffff; font: 11px monospace; }')
         Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), section_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 2)
         context = self.toolbar.get_style_context()
         if self.preferences.values['bar_texture'] == 'marble':
@@ -370,7 +408,7 @@ class Dropmux(Gtk.Application):
         # Identify our client through its terminal tty after spawn, rather than touching other clients.
         self.attaching = True
         self.term.spawn_async(Vte.PtyFlags.DEFAULT, os.getcwd(), self.tmux.attach_argv(session),
-                              None, GLib.SpawnFlags.DEFAULT, None, None, -1, None, self.spawned, None)
+                              [f"{key}={value}" for key, value in {**backend.CHILD_ENV, "TERM": "xterm-256color"}.items()] if backend.CHILD_ENV is not None else None, GLib.SpawnFlags.DEFAULT, None, None, -1, None, self.spawned, None)
 
     def spawned(self, terminal, pid, error, data):
         self.attaching = False
@@ -396,9 +434,20 @@ class Dropmux(Gtk.Application):
                     pid, client, session = line.split("\t")
                     if pid == str(self.pid):
                         self.client, self.session = client, session
-                windows = self.tmux.windows(self.session)
+                all_panes = self.tmux.panes()
+                panes = [row for row in all_panes if row[0] == self.session]
+                self.pane_server = self.tmux.command('display-message', '-p', '#{socket_path}:#{pid}:#{start_time}')
+                valid_ids = {row[5] for row in all_panes}
+                pins = [pin for pin in self.preferences.values['pane_pins']
+                        if pin['server'] == self.pane_server and pin['pane'] in valid_ids]
+                if pins != self.preferences.values['pane_pins']:
+                    self.preferences.values['pane_pins'] = pins
+                    self.preferences.save()
+                active_pane = self.tmux.pane(self.session)
             else:
-                windows = []
+                all_panes = []
+                panes = []
+                active_pane = None
             if self.session:
                 info = self.tmux.command('display-message', '-p', '-t', self.session + ':',
                     '[#{session_name}] #{window_index}:#{window_name}#{?window_zoomed_flag,Z,}\t#{pane_current_path}').split('\t', 1)
@@ -407,7 +456,11 @@ class Dropmux(Gtk.Application):
                 self.footer_right.set_text('PATH  ' + path)
                 self.footer_right.set_tooltip_text(path)
                 self.footer_clock.set_text('TIME  ' + datetime.now().strftime('%H:%M · %d %b %Y'))
-            snapshot = (sessions, windows, self.session)
+            pinned_ids = {pin['pane'] for pin in self.preferences.values['pane_pins']}
+            pinned_rows = [row for row in all_panes if row[5] in pinned_ids]
+            self.pin_pane_button.set_sensitive(bool(active_pane))
+            self.pin_pane_button.set_label("Unpin pane" if active_pane in pinned_ids else "Pin pane")
+            snapshot = (sessions, panes, self.session, active_pane, pinned_rows)
             if snapshot == self.snapshot:
                 return True
             self.snapshot = snapshot
@@ -419,15 +472,83 @@ class Dropmux(Gtk.Application):
             self.updating = False
             for child in self.tabs.get_children():
                 self.tabs.remove(child)
-            for identifier, name, active in windows:
-                label = ("● " if active == "1" else "") + name
-                self.button(self.tabs, label, "Select tmux window", lambda identifier=identifier: self.tmux.command("select-window", "-t", identifier))
+            for session_id, session_name, window, window_index, pane_index, pane_id, title in panes:
+                active = pane_id == active_pane
+                caption = " ".join(title.split()) or "Terminal"
+                label = ("● " if active else "") + f"{window_index}.{pane_index} · {caption}"
+                button = Gtk.ToggleButton(label=label)
+                button.set_size_request(144, -1)
+                button.pane_id = pane_id
+                button.connect('button-press-event', lambda widget, event, pid=pane_id: self.pane_context_menu(widget, event, pid))
+                button.set_active(active)
+                button.set_tooltip_text(f"Focus pane {pane_id}: {session_name}/{window_index}.{pane_index} — {caption}")
+                child = button.get_child()
+                child.set_ellipsize(Pango.EllipsizeMode.END)
+                child.set_max_width_chars(18)
+                button.connect("clicked", lambda _, sid=session_id, wid=window, pid=pane_id:
+                               self.perform(lambda: self.focus_pane(sid, wid, pid)))
+                self.tabs.pack_start(button, False, False, 0)
             self.tabs.show_all()
+            for child in self.pinned_tabs.get_children():
+                self.pinned_tabs.remove(child)
+            for sid, session_name, wid, window_index, pane_index, pid, title in pinned_rows:
+                caption = " ".join(title.split()) or "Terminal"
+                button = Gtk.Button(label=f"★ {session_name}/{window_index}.{pane_index} · {caption}")
+                button.set_size_request(172, -1)
+                button.pane_id = pid
+                button.connect('button-press-event', lambda widget, event, pid=pid: self.pane_context_menu(widget, event, pid))
+                button.get_child().set_ellipsize(Pango.EllipsizeMode.END)
+                button.get_child().set_max_width_chars(18)
+                button.set_tooltip_text(f"Pinned pane {pid} — switch workspace and focus {caption}")
+                button.connect('clicked', lambda _, pid=pid: self.perform(lambda: self.focus_pinned_pane(pid)))
+                self.pinned_tabs.pack_start(button, False, False, 0)
+            if not pinned_rows:
+                self.pinned_tabs.pack_start(Gtk.Label(label="—", tooltip_text="Right-click a pane or use Pin pane to add a global pin"), False, False, 0)
+            self.pinned_tabs.show_all()
             if self.session:
                 self.status.set_text("Native tmux · click panes to focus · drag dividers to resize · closing this window hides it")
         except Exception as error:
             self.status.set_text(str(error))
         return True
+
+    def pane_context_menu(self, widget, event, pane):
+        if event.button != 3:
+            return False
+        pinned = any(pin['pane'] == pane for pin in self.preferences.values['pane_pins'])
+        self.menu([("Unpin pane" if pinned else "Pin pane", lambda: self.toggle_pane_pin(pane))])
+        return True
+
+    def toggle_pane_pin(self, pane=None):
+        if not self.session:
+            return
+        self.refresh()
+        pane = pane or self.tmux.pane(self.session)
+        if not any(row[5] == pane for row in self.tmux.panes()):
+            return
+        pins = self.preferences.values['pane_pins']
+        record = {'server': self.pane_server, 'pane': pane}
+        self.preferences.values['pane_pins'] = [pin for pin in pins if pin != record] if record in pins else pins + [record]
+        self.preferences.save()
+        self.snapshot = None
+        self.refresh()
+
+    def focus_pinned_pane(self, pane):
+        self.refresh()
+        if not any(pin['pane'] == pane and pin['server'] == self.pane_server
+                   for pin in self.preferences.values['pane_pins']):
+            return
+        row = next((row for row in self.tmux.panes() if row[5] == pane), None)
+        if row:
+            self.focus_pane(row[0], row[2], row[5])
+
+    def focus_pane(self, session, window, pane):
+        self.tmux.focus_pane(window, pane)
+        if self.session != session:
+            self.attach(session)
+        # Rebuild even when a click toggled the already-active button off.
+        self.snapshot = None
+        self.refresh()
+        self.term.grab_focus()
 
     def session_changed(self, combo):
         if getattr(self, "updating", False):
