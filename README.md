@@ -43,19 +43,19 @@ The optional `launch.sh` starts the application in an existing Distrobox named `
 
 Requires Distrobox and rootless Podman on the host. The setup script does not install these host prerequisites.
 
-To clone an existing `codex-tools` box with its installed packages, including GitHub Desktop:
-
-```sh
-./scripts/recreate-distrobox.sh --name codex-tools-copy
-```
-
-Use `--source NAME` for a differently named source. The script refuses to overwrite an existing destination. This local clone is the closest match to the current environment; it is not a portable image backup.
-
-To rebuild on another machine:
+To recreate the environment as `codex-tools` on another machine:
 
 ```sh
 ./scripts/recreate-distrobox.sh --fresh --name codex-tools
 ```
+
+To clone an existing box, use a differently named source and keep `codex-tools` as the destination:
+
+```sh
+./scripts/recreate-distrobox.sh --source codex-tools-template --name codex-tools
+```
+
+Replace `codex-tools-template` with the source box's actual name. Source and destination names must differ. If `codex-tools` already exists, the script stops without changing it. A local clone preserves installed packages, including GitHub Desktop; it is not a portable image backup.
 
 This starts from `docker.io/library/archlinux:latest` and installs the explicit official Arch package set recorded in `environment/packages.arch.txt`, including GTK/VTE, tmux, fish, Git and GitHub CLI. `environment/packages.snapshot.txt` records installed versions for reference; Arch is rolling-release, so a fresh rebuild does not pin those versions.
 
