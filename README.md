@@ -1,45 +1,82 @@
 # Dropmux
 
-Dropmux is a Linux terminal workspace. It combines a GTK/VTE terminal viewport, real tmux sessions and panes, and buttons for local Codex tasks.
+**A Linux terminal workspace that brings tmux sessions and Codex tasks into one window.**
 
-## Features
+Switch between task workspaces, manage terminal panes through native menus, and keep sessions running when the window closes. Dropmux combines a GTK/VTE terminal viewport with tmux-backed sessions and a customizable control bar.
 
-- A normal movable desktop window with a native bottom control bar.
-- Task buttons that attach or create a dedicated tmux session in each task's working folder.
-- Read-only refresh of local Codex task names every three seconds; archived tasks and subagents are excluded.
-- Real tmux pane splitting, layouts, zoom, session switching and window creation through File and Options menus.
-- Terminal sessions survive hiding, quitting and reopening the GUI.
-- Separate black status sections with white text for session/window, active pane path and local time/date.
-- Personalization for terminal font, bar color, bar visibility, and Brushed, Diagonal, Grid or generated Marble textures.
-- Saved window size and display preferences.
+> Working prototype. Core terminal and task-session workflows are implemented; packaging and further layout refinements are in progress.
+
+## What you can do
+
+- **Switch by task.** Select a local Codex task to attach or create a terminal session in its working folder. Task names refresh automatically every three seconds.
+- **Manage panes visually.** Split panes, choose layouts, zoom the focused pane, and create windows through the File and Options menus.
+- **Keep work running.** Hide or quit the interface without ending tmux sessions, then reopen to reconnect.
+- **Stay oriented.** View the active session/window, pane folder, and local date/time in separate status sections.
+- **Personalize the workspace.** Change the terminal font, control-bar color, visibility, and texture. Choose Brushed, Diagonal, Grid, Marble, or no texture.
+- **Work from the keyboard.** Navigate task buttons and menus without taking focus away from terminal applications permanently.
 
 Task buttons select terminal workspaces. They do not launch Codex agents or submit chat prompts.
 
-## Run
+## Getting started
 
-Requires Python 3, PyGObject, GTK 3, VTE 2.91 and tmux. On Arch Linux, dependencies are `python-gobject gtk3 vte3 tmux`.
+### Requirements
+
+Linux with a graphical desktop, Python 3, PyGObject, GTK 3, VTE 2.91, and tmux.
+
+On Arch Linux:
 
 ```sh
+sudo pacman -S python-gobject gtk3 vte3 tmux
+```
+
+### Launch
+
+```sh
+git clone https://github.com/Biggamer11/Dropmux.git
+cd Dropmux
 python3 dropmux.py --show
 ```
 
-The supplied `launch.sh` uses an existing Arch Distrobox named `codex-tools`. Edit that launcher for a different container, or run Python directly on a host with the dependencies installed.
+The optional `launch.sh` starts the application in an existing Distrobox named `codex-tools`. Adapt the launcher for another container, or run directly on the host.
 
-## Keyboard and menus
+## Controls
 
-Alt+T focuses task buttons; Left/Right move between them, Enter/Space activates, and Escape/Down returns to the terminal. Alt+F/O/P/H opens File, Options, Personalization or Help.
+| Control | Action |
+| --- | --- |
+| Task button | Open or attach that task's terminal session |
+| File | Create sessions/windows, hide, or quit |
+| Options | Split panes, choose layouts, zoom, close panes, pin, or toggle fullscreen |
+| Personalization | Change font, bar color, texture, or visibility |
+| Help | View keyboard shortcuts |
 
-Pane/window actions live in File and Options. Hide and Quit leave tmux running; Close pane asks for confirmation before terminating that pane.
+**Hide** and **Quit** keep tmux running. **Close pane** asks for confirmation before terminating the selected pane and its processes.
 
-## Local settings and task metadata
+### Keyboard shortcuts
 
-Preferences are saved to `~/.config/dropmux/settings.json`. tmux runs on a dedicated `dropmux` socket.
+| Shortcut | Action |
+| --- | --- |
+| Alt+T | Focus task buttons |
+| Left / Right | Move between focused task buttons |
+| Enter / Space | Activate the selected button |
+| Escape / Down | Return focus to the terminal |
+| Alt+F / O / P / H | Open File / Options / Personalization / Help |
 
-Task discovery reads metadata from `$CODEX_HOME/state_5.sqlite` (default `~/.codex/state_5.sqlite`) using a read-only connection. This database is a Codex implementation detail; future schema changes may require updates. When unavailable, Dropmux uses an optional local `tasks.json`; copy `tasks.example.json` to get started. Task entries contain `id`, `title`, `cwd`, and a safe tmux `session` name. Personal task metadata is excluded from Git.
+## Settings and task discovery
 
-The terminal embeds the normal tmux client in VTE. Independent pane rendering through tmux control mode, global dropdown shortcuts, automatic reconnect and packaging remain future work. Small windows may need further layout refinement. A host fish configuration referencing files missing inside a container can produce a shell startup warning.
+Display preferences are stored in `~/.config/dropmux/settings.json`. Terminal sessions use the dedicated tmux socket `dropmux`.
 
-## Validation
+Dropmux reads local Codex task metadata through a read-only connection to `$CODEX_HOME/state_5.sqlite`, defaulting to `~/.codex/state_5.sqlite`. Archived tasks and subagents are excluded. This is an internal Codex database format and may change between versions.
+
+If task discovery is unavailable, an optional `tasks.json` provides a local fallback. Start with `tasks.example.json`; each entry contains `id`, `title`, `cwd`, and a tmux-safe `session` name. Local task lists and settings are excluded from Git.
+
+## Current limitations
+
+- Task-button overflow and status layouts need refinement at smaller window sizes.
+- The viewport embeds a normal tmux client; independent pane rendering through tmux control mode is not implemented.
+- A configurable global dropdown shortcut, automatic reconnect, and installable packages remain planned work.
+- Container shells may need their own configuration if host startup files reference unavailable dependencies.
+
+## Development checks
 
 ```sh
 python3 -m unittest test_backend.py
@@ -47,7 +84,6 @@ python3 test_integration.py
 python3 gui_check.py
 ```
 
-Integration and GUI checks use dedicated test tmux sockets. GUI checks require a graphical desktop and verify terminal input, pane splitting, session survival/switching, task session folders, external tmux window changes, settings, texture styles and keyboard focus.
+Integration checks use isolated tmux sockets. GUI checks require a graphical desktop and cover terminal input, pane splitting, session switching/survival, task working folders, external window updates, preferences, textures, and keyboard focus.
 
-`assets/marble-bar.png` was generated with built-in imagegen: pale ivory/light gray marble, subtle veins near the edges, quiet central space guided by the toolbar layout, and no painted text or buttons.
-
+The bundled marble background is a generated image asset; controls remain native, interactive UI elements over the texture.
